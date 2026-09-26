@@ -1,0 +1,22 @@
+# Built by Gradle / Android Studio
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+captures/
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+*.jks
+keystore.properties
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# JVM crash-replay logs emitted by Gradle/kotlin daemon crashes
+replay_pid*.log

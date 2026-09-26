@@ -1,0 +1,282 @@
+package com.zerotranslater.ui
+
+import android.app.Application
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.google.mlkit.common.model.DownloadConditions
+import com.zerotranslater.data.Settings
+import com.zerotranslater.data.SettingsStore
+import com.zerotranslater.engine.LanguagePair
+import com.zerotranslater.engine.TranslateRequest
+import com.zerotranslater.engine.TranslationError
+import com.zerotranslater.engine.TranslationManager
+import com.zerotranslater.engine.TranslationOutcome
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+data class TranslateUiState(
+    val sourceText: String = "",
+    val sourceLanguage: String = LanguagePair.AUTO,
+    val targetLanguage: String = Settings.DEFAULT_TARGET,
+    val output: String = "",
+    /** Concrete source after auto-detection; null while still unknown. */
+    val resolvedSource: String? = null,
+    val isBusy: Boolean = false,
+    val error: TranslationError? = null,
+    val inputWasTruncated: Boolean = false,
+    /** Packs this translation needs, or null while the source is still auto-detect. */
+    val packsNeeded: Int? = null,
+    val routedViaEnglish: Boolean = false,
+    val missingPacks: List<String> = emptyList(),
+    val isDownloadingPacks: Boolean = false,
+    val wifiOnlyDownloads: Boolean = false,
+) {
+    val charCount: Int get() = sourceText.length
+    val canTranslate: Boolean get() = sourceText.isNotBlank() && !isBusy
+    val hasOutput: Boolean get() = output.isNotBlank()
+}
+
+class TranslateViewModel(application: Application) : ViewModel() {
+
+    private val settingsStore = SettingsStore(application)
+
+    /**
+     * Read synchronously by the engine when it builds download conditions, so it is
+     * a plain volatile field rather than part of the state flow.
+     */
+    @Volatile
+    private var wifiOnly: Boolean = false
+
+    private val manager = TranslationManager(
+        downloadConditions = {
+            if (wifiOnly) {
+                DownloadConditions.Builder().requireWifi().build()
+            } else {
+                DownloadConditions.Builder().build()
+            }
+        },
+    )
+
+    private val _state = MutableStateFlow(TranslateUiState())
+    val state: StateFlow<TranslateUiState> = _state.asStateFlow()
+
+    private var translateJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            settingsStore.settings.collect { saved ->
+                wifiOnly = saved.wifiOnlyDownloads
+                _state.update { current ->
+                    current.withLanguages(
+                        source = saved.sourceLanguage,
+                        target = saved.targetLanguage,
+                        wifiOnly = saved.wifiOnlyDownloads,
+                    )
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------- input
+
+    fun onSourceTextChange(value: String) {
+        _state.update { it.copy(sourceText = value, error = null) }
+        translateJob?.cancel()
+        translateJob = viewModelScope.launch {
+            delay(DEBOUNCE_MS)
+            runTranslation()
+        }
+    }
+
+    /** Explicit trigger from the IME action key or the Translate button. */
+    fun translateNow() {
+        translateJob?.cancel()
+        translateJob = viewModelScope.launch { runTranslation() }
+    }
+
+    fun onSourceLanguageChange(code: String) {
+        _state.update { it.copy(sourceLanguage = code, error = null, resolvedSource = null) }
+        viewModelScope.launch { settingsStore.setSourceLanguage(code) }
+    }
+
+    fun onTargetLanguageChange(code: String) {
+        _state.update { it.copy(targetLanguage = code, error = null) }
+        viewModelScope.launch { settingsStore.setTargetLanguage(code) }
+    }
+
+    /**
+     * Swap is only meaningful between two concrete languages.
+     *
+     * With auto-detect as the source there is no concrete language to promote, so
+     * the current target becomes an explicit source and the target falls back to
+     * the default. That is the only predictable reading of "swap" here; the
+     * alternative - silently doing nothing - would read as a broken button.
+     */
+    fun swapLanguages() {
+        val current = _state.value
+        val concreteSource = current.resolvedSource
+            ?: current.sourceLanguage.takeIf { it != LanguagePair.AUTO }
+
+        if (concreteSource == null) {
+            onSourceLanguageChange(current.targetLanguage)
+            onTargetLanguageChange(Settings.DEFAULT_TARGET)
+        } else {
+            onSourceLanguageChange(current.targetLanguage)
+            onTargetLanguageChange(concreteSource)
+        }
+        clearOutput()
+    }
+
+    fun clearInput() {
+        translateJob?.cancel()
+        _state.update {
+            it.copy(
+                sourceText = "",
+                output = "",
+                error = null,
+                resolvedSource = null,
+                inputWasTruncated = false,
+                missingPacks = emptyList(),
+            )
+        }
+    }
+
+    private fun clearOutput() {
+        _state.update {
+            it.copy(output = "", error = null, resolvedSource = null, inputWasTruncated = false)
+        }
+    }
+
+    fun setWifiOnlyDownloads(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.setWifiOnlyDownloads(enabled) }
+    }
+
+    fun dismissError() {
+        _state.update { it.copy(error = null) }
+    }
+
+    // ------------------------------------------------------------------ engine
+
+    private suspend fun runTranslation() {
+        val current = _state.value
+        if (current.sourceText.isBlank()) {
+            _state.update { it.copy(output = "", error = null, isBusy = false) }
+            return
+        }
+        _state.update { it.copy(isBusy = true, error = null) }
+
+        val outcome = manager.translate(
+            TranslateRequest(
+                text = current.sourceText,
+                sourceLanguage = current.sourceLanguage,
+                targetLanguage = current.targetLanguage,
+            ),
+        )
+
+        when (outcome) {
+            is TranslationOutcome.Success -> _state.update {
+                it.copy(
+                    output = outcome.translatedText,
+                    resolvedSource = outcome.resolvedSource,
+                    isBusy = false,
+                    error = null,
+                    inputWasTruncated = outcome.wasTruncated,
+                    missingPacks = emptyList(),
+                ).recomputePackHint()
+            }
+
+            is TranslationOutcome.Failure -> _state.update {
+                it.copy(
+                    isBusy = false,
+                    output = "",
+                    error = outcome.error,
+                    missingPacks = (outcome.error as? TranslationError.ModelNotDownloaded)
+                        ?.missing
+                        .orEmpty(),
+                )
+            }
+        }
+    }
+
+    /** Downloads the packs this translation is blocked on, then retries it. */
+    fun downloadMissingPacks() {
+        val missing = _state.value.missingPacks
+        if (missing.isEmpty()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isDownloadingPacks = true, error = null) }
+            val result = runCatching { manager.downloadPacks(missing) }
+            _state.update {
+                it.copy(
+                    isDownloadingPacks = false,
+                    error = result.exceptionOrNull()?.let { cause ->
+                        TranslationError.DownloadFailed(missing, cause.message ?: "unknown")
+                    },
+                    missingPacks = if (result.isSuccess) emptyList() else missing,
+                )
+            }
+            if (result.isSuccess) {
+                translateJob?.cancel()
+                translateJob = viewModelScope.launch { runTranslation() }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        // Releases the cached ML Kit translator's native memory. Without this the
+        // model stays resident for the lifetime of the process.
+        manager.close()
+        super.onCleared()
+    }
+
+    companion object {
+        private const val DEBOUNCE_MS = 450L
+
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]
+                    as Application
+                TranslateViewModel(app)
+            }
+        }
+    }
+}
+
+/**
+ * Applies a language-pair change and recomputes the derived pack hint in one step,
+ * so the hint can never drift out of sync with the languages it describes.
+ */
+private fun TranslateUiState.withLanguages(
+    source: String,
+    target: String,
+    wifiOnly: Boolean,
+): TranslateUiState = copy(
+    sourceLanguage = source,
+    targetLanguage = target,
+    wifiOnlyDownloads = wifiOnly,
+).recomputePackHint()
+
+/**
+ * Works out how many packs the current pair costs and whether it has to route
+ * through English. Returns null packs when the source is still auto-detect,
+ * because the real number is not knowable until a language is detected - showing
+ * a guess would be worse than showing nothing.
+ */
+private fun TranslateUiState.recomputePackHint(): TranslateUiState {
+    val concrete = resolvedSource ?: sourceLanguage.takeIf { it != LanguagePair.AUTO }
+    return if (concrete == null) {
+        copy(packsNeeded = null, routedViaEnglish = false)
+    } else {
+        copy(
+            packsNeeded = LanguagePair.packCount(concrete, targetLanguage),
+            routedViaEnglish = LanguagePair.requiresPivot(concrete, targetLanguage),
+        )
+    }
+}

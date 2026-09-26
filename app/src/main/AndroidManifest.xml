@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      No <uses-permission> is declared here.
+
+      ZeroTranslater opens no sockets of its own; translation happens entirely on
+      device. android.permission.INTERNET arrives transitively from the ML Kit
+      artifacts, which are the only component that needs it in order to fetch
+      language packs from Play services. Verified with:
+        ./gradlew :app:processDebugMainManifest
+      See README -> "Permissions".
+    -->
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ZeroTranslater">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.ZeroTranslater"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          The system-wide "Ztranslate" action.
+
+          Registering for android.intent.action.PROCESS_TEXT with category DEFAULT
+          is what makes this activity appear in the floating text-selection menu
+          alongside Copy / Cut / Paste / Select all. android:label is what the
+          system renders in that menu, so it is deliberately short.
+
+          KNOWN REACH LIMITATION (documented in README): PROCESS_TEXT is only
+          offered by apps that implement the ActionMode text-selection API.
+          WebView-based apps, games, and many custom editors do not, so this action
+          will not appear everywhere. Some OEM ROMs (notably MIUI/Xiaomi) strip
+          third-party PROCESS_TEXT handlers entirely.
+        -->
+        <activity
+            android:name=".ProcessTextActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/process_text_label"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.ZeroTranslater.Dialog">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>

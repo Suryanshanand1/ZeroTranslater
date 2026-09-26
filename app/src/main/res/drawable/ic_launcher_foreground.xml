@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive-icon foreground. The 108x108 viewport has a 72x72 safe zone
+  (18..90 on both axes), so the glyph is kept inside 30..78 / 38..70 and is
+  centred on (54,54).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M30,38 L78,38 L78,46 L46,62 L78,62 L78,70 L30,70 L30,62 L62,46 L30,46 Z" />
+</vector>

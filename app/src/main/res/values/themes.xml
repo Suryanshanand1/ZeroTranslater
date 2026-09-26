@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      Compose draws the entire UI, so these XML themes exist only to style the
+      window shell (status/nav bar, translucency). They intentionally do NOT
+      inherit from AppCompat or Material Components: the app has no
+      androidx.appcompat dependency at all.
+
+      night/ contains the dark counterpart of both styles.
+    -->
+    <style name="Theme.ZeroTranslater" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+
+    <!--
+      The PROCESS_TEXT overlay.
+
+      This is a translucent *activity* theme (not a BottomSheetDialog theme):
+      a BottomSheetDialog theme assumes it is hosted by an opaque activity and
+      renders an opaque window, which would leave the user looking at a full
+      screen and would violate the "do not navigate away from the host app"
+      requirement. Instead the window is fully transparent and dimmed, and
+      ProcessTextActivity renders a Compose ModalBottomSheet inside it.
+
+      android:excludeFromRecents="true" is set on the activity in the manifest
+      so this overlay never leaves a trace in the recents list.
+    -->
+    <style name="Theme.ZeroTranslater.Dialog" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <!-- Dimming is done by the Compose ModalBottomSheet scrim. Leaving the
+             platform dim on as well would double-darken the host app behind. -->
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.Dialog</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+</resources>

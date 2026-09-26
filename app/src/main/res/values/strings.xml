@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ZeroTranslater</string>
+
+    <!-- Rendered inside the system text-selection menu next to Copy/Cut/Paste.
+         Kept to one word so it fits in the popup row. -->
+    <string name="process_text_label">Ztranslate</string>
+
+    <string name="source_language">Source</string>
+    <string name="target_language">Target</string>
+    <string name="auto_detect">Auto-detect</string>
+    <string name="swap_languages">Swap source and target language</string>
+    <string name="clear_input">Clear input</string>
+    <string name="copy_translation">Copy translation</string>
+    <string name="copied">Copied</string>
+    <string name="translate">Translate</string>
+    <string name="char_count">%1$d / %2$d</string>
+    <string name="manage_packs">Language packs</string>
+    <string name="download">Download</string>
+    <string name="delete">Delete</string>
+    <string name="downloading">Downloading…</string>
+    <string name="back">Back</string>
+    <string name="close">Close</string>
+    <string name="open_in_app">Open in ZeroTranslater</string>
+    <string name="wifi_only_downloads">Download packs over Wi-Fi only</string>
+    <string name="wifi_only_summary">Avoids using mobile data for language packs.</string>
+
+    <string name="err_empty_input">Nothing to translate yet.</string>
+    <string name="err_model_missing">Language pack not downloaded: %1$s</string>
+    <string name="err_download_failed">Could not download the language pack. Check your connection.</string>
+    <string name="err_unsupported_pair">%1$s to %2$s is not a supported pair.</string>
+    <string name="err_low_confidence">Not sure what language this is. Pick a source language.</string>
+    <string name="err_detected_unsupported">Detected %1$s, which has no translation model. Pick a different source language.</string>
+    <string name="err_unknown">Translation failed: %1$s</string>
+    <string name="detected_language">Detected: %1$s</string>
+    <string name="retry">Retry</string>
+    <string name="source_text_label">Text to translate</string>
+    <string name="translation_label">Translation</string>
+    <string name="original_text_label">Selected text</string>
+    <string name="no_packs_yet">No language packs installed yet.</string>
+    <string name="search_languages">Search languages</string>
+    <string name="selected_label">%1$s selected</string>
+    <string name="pack_installed">On device</string>
+    <string name="pack_not_installed">Not downloaded</string>
+
+    <!-- Counts need real plurals: languages like Polish and Russian change the
+         noun form, so "pack(s)" would ship visibly wrong text. -->
+    <plurals name="err_truncated">
+        <item quantity="one">Input was truncated to %1$d character.</item>
+        <item quantity="other">Input was truncated to %1$d characters.</item>
+    </plurals>
+    <plurals name="packs_needed">
+        <item quantity="one">Needs %1$d language pack</item>
+        <item quantity="other">Needs %1$d language packs</item>
+    </plurals>
+    <plurals name="packs_needed_pivot">
+        <item quantity="one">Routed via English — needs %1$d pack</item>
+        <item quantity="other">Routed via English — needs %1$d packs</item>
+    </plurals>
+</resources>
