@@ -55,10 +55,18 @@ everything the user copies is the exact behaviour Android 10 blocked, which exis
 to stop apps reading 2FA codes and passwords out of the clipboard.
 
 So the button is a deliberate, user-initiated trigger instead. **The tap is what
-grants focus** — `ProcessTextActivity` reads the clipboard itself, in
-`onWindowFocusChanged`, which the platform permits because a real activity window
-holds focus at that point. The button is `FLAG_NOT_FOCUSABLE`, so it never takes
-focus while it is merely sitting on screen.
+grants focus**: it starts a transparent `ProcessTextActivity`, whose whole job is
+to hold a focused window long enough for one clipboard read.
+
+One detail there is sharper than it looks. The activity shows its result in a
+material3 `ModalBottomSheet`, and current material3 composes that sheet into its
+**own dialog window** — so the dialog, not the activity's window, is what the
+platform focuses; the activity window behind it stays unfocused indefinitely.
+Waiting on the activity's `onWindowFocusChanged` alone therefore never resolves,
+and the sheet spins forever. The read is triggered from the **sheet's window**
+focus, with the activity's callback kept as a second trigger, and a flag
+collapses both into exactly one read. The button itself is `FLAG_NOT_FOCUSABLE`,
+so it never takes focus while it is merely sitting on screen.
 
 Cost: one tap per translation, rather than zero. Benefit: no polling, no
 clipboard listener, no focus theft, and nothing that could read a password.
@@ -73,7 +81,7 @@ build-tools 36.0.0, and a `local.properties` containing `sdk.dir=...`.
 ./gradlew assembleDebug          # installable, signed with the debug key
 ./gradlew assembleRelease        # R8-minified
 ./gradlew bundleRelease          # .aab - the artifact to publish
-./gradlew test                   # 23 unit tests
+./gradlew test                   # 36 unit tests
 ./gradlew lintDebug
 ```
 

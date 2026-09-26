@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -26,10 +27,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,7 +61,9 @@ class ProcessTextActivity : ComponentActivity() {
 
     /**
      * True when this launch came from the floating pill, meaning the text has to be
-     * read from the clipboard and the read cannot happen until the window has focus.
+     * read from the clipboard and the read cannot happen until one of this app's
+     * windows holds focus. Doubles as the guard that makes the read run exactly
+     * once, even though two windows can each report gaining focus.
      */
     private var awaitingClipboard = false
 
@@ -69,9 +74,12 @@ class ProcessTextActivity : ComponentActivity() {
 
         if (fromClipboard) {
             // Deliberately not reading the clipboard yet. The platform only grants
-            // clipboard access to an app whose UID holds window focus, and focus is
-            // not granted until after onCreate/onStart. Reading here returns null on
-            // Android 10+, so the read is deferred to onWindowFocusChanged below.
+            // clipboard access to an app whose UID owns a focused window, and this
+            // activity's own window is never the focused one: the sheet below opens
+            // as a separate dialog window (material3 ModalBottomSheet), which takes
+            // focus instead and leaves the activity window behind it permanently
+            // unfocused. The read is therefore triggered from whichever window
+            // reports focus first - see tryConsumeClipboard().
             awaitingClipboard = true
         } else {
             if (!consume(extrasFor(intent))) return
@@ -81,20 +89,32 @@ class ProcessTextActivity : ComponentActivity() {
 
         setContent {
             ZeroTranslaterTheme {
-                ProcessTextSheet(viewModel = viewModel, onDismiss = { finish() })
+                ProcessTextSheet(
+                    viewModel = viewModel,
+                    onDismiss = { finish() },
+                    onWindowFocus = { tryConsumeClipboard() },
+                )
             }
         }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && awaitingClipboard) {
-            awaitingClipboard = false
-            // Now that this activity genuinely holds focus, the clipboard read is
-            // permitted by the platform. Still resolves to Empty if the clipboard
-            // holds nothing, has been auto-cleared, or holds only whitespace.
-            consume(readClipboardText())
-        }
+        if (hasFocus) tryConsumeClipboard()
+    }
+
+    /**
+     * Runs the deferred clipboard read, whichever focus observer got there first.
+     *
+     * The activity window and the sheet's dialog window each signal focus
+     * independently; [awaitingClipboard] collapses them into a single read.
+     * Still resolves to Empty - and finishes silently - when the clipboard holds
+     * nothing, has been auto-cleared, or holds only whitespace.
+     */
+    private fun tryConsumeClipboard() {
+        if (!awaitingClipboard) return
+        awaitingClipboard = false
+        consume(readClipboardText())
     }
 
     /**
@@ -144,6 +164,7 @@ class ProcessTextActivity : ComponentActivity() {
 private fun ProcessTextSheet(
     viewModel: ProcessTextViewModel,
     onDismiss: () -> Unit,
+    onWindowFocus: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -151,6 +172,27 @@ private fun ProcessTextSheet(
 
     Box(Modifier.fillMaxSize()) {
         ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+            // Everything inside this lambda composes into the sheet's own dialog
+            // window, and that dialog is the window the platform actually hands
+            // input focus to - the activity's transparent window stays unfocused
+            // behind it, so waiting on the activity for focus never resolves.
+            // Watching the sheet's window is what lets the deferred clipboard
+            // read from the pill path run at all.
+            val sheetView = LocalView.current
+            DisposableEffect(sheetView) {
+                val listener = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+                    if (hasFocus) onWindowFocus()
+                }
+                sheetView.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+                // Focus may have arrived before this effect had a chance to run.
+                if (sheetView.hasWindowFocus()) onWindowFocus()
+                onDispose {
+                    sheetView.viewTreeObserver
+                        .takeIf { it.isAlive }
+                        ?.removeOnWindowFocusChangeListener(listener)
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
