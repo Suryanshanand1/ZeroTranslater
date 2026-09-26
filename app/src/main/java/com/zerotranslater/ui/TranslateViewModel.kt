@@ -70,6 +70,31 @@ class TranslateViewModel(application: Application) : ViewModel() {
 
     private var translateJob: Job? = null
 
+    /**
+     * Invalidates the result of any in-flight translation.
+     *
+     * `Job.cancel()` only *requests* cancellation: it marks the coroutine and
+     * returns at once, so an in-flight `manager.translate` can still complete and
+     * would then write its output into state that has already moved on - showing a
+     * translation of the previous language pair underneath the newly selected pair.
+     * Bumping this counter on every input, language, or clearing change lets
+     * [runTranslation] recognise its own result as stale and discard it.
+     */
+    private var translationEpoch = 0
+
+    /**
+     * Drops any in-flight translation and clears the busy flag.
+     *
+     * The flag has to be reset here rather than left to the cancelled coroutine:
+     * a cancelled coroutine never reaches the line that clears it, so relying on
+     * that strands the UI on a permanent progress indicator.
+     */
+    private fun cancelInFlight() {
+        translationEpoch++
+        translateJob?.cancel()
+        _state.update { it.copy(isBusy = false) }
+    }
+
     init {
         viewModelScope.launch {
             settingsStore.settings.collect { saved ->
@@ -89,7 +114,7 @@ class TranslateViewModel(application: Application) : ViewModel() {
 
     fun onSourceTextChange(value: String) {
         _state.update { it.copy(sourceText = value, error = null) }
-        translateJob?.cancel()
+        cancelInFlight()
         translateJob = viewModelScope.launch {
             delay(DEBOUNCE_MS)
             runTranslation()
@@ -98,17 +123,36 @@ class TranslateViewModel(application: Application) : ViewModel() {
 
     /** Explicit trigger from the IME action key or the Translate button. */
     fun translateNow() {
-        translateJob?.cancel()
+        cancelInFlight()
         translateJob = viewModelScope.launch { runTranslation() }
     }
 
     fun onSourceLanguageChange(code: String) {
-        _state.update { it.copy(sourceLanguage = code, error = null, resolvedSource = null) }
+        // The pair is about to change, so a translation of the old pair is now
+        // meaningless. Drop it instead of leaving it on screen under new labels.
+        cancelInFlight()
+        _state.update {
+            it.copy(
+                sourceLanguage = code,
+                output = "",
+                error = null,
+                resolvedSource = null,
+                inputWasTruncated = false,
+            )
+        }
         viewModelScope.launch { settingsStore.setSourceLanguage(code) }
     }
 
     fun onTargetLanguageChange(code: String) {
-        _state.update { it.copy(targetLanguage = code, error = null) }
+        cancelInFlight()
+        _state.update {
+            it.copy(
+                targetLanguage = code,
+                output = "",
+                error = null,
+                inputWasTruncated = false,
+            )
+        }
         viewModelScope.launch { settingsStore.setTargetLanguage(code) }
     }
 
@@ -136,7 +180,7 @@ class TranslateViewModel(application: Application) : ViewModel() {
     }
 
     fun clearInput() {
-        translateJob?.cancel()
+        cancelInFlight()
         _state.update {
             it.copy(
                 sourceText = "",
@@ -145,6 +189,7 @@ class TranslateViewModel(application: Application) : ViewModel() {
                 resolvedSource = null,
                 inputWasTruncated = false,
                 missingPacks = emptyList(),
+                isBusy = false,
             )
         }
     }
@@ -166,6 +211,7 @@ class TranslateViewModel(application: Application) : ViewModel() {
     // ------------------------------------------------------------------ engine
 
     private suspend fun runTranslation() {
+        val epoch = ++translationEpoch
         val current = _state.value
         if (current.sourceText.isBlank()) {
             _state.update { it.copy(output = "", error = null, isBusy = false) }
@@ -180,6 +226,11 @@ class TranslateViewModel(application: Application) : ViewModel() {
                 targetLanguage = current.targetLanguage,
             ),
         )
+
+        // The input, the language pair, or both changed while this was in flight.
+        // [current] describes a state that no longer exists, so the result is
+        // discarded rather than published.
+        if (epoch != translationEpoch) return
 
         when (outcome) {
             is TranslationOutcome.Success -> _state.update {
@@ -223,7 +274,7 @@ class TranslateViewModel(application: Application) : ViewModel() {
                 )
             }
             if (result.isSuccess) {
-                translateJob?.cancel()
+                cancelInFlight()
                 translateJob = viewModelScope.launch { runTranslation() }
             }
         }

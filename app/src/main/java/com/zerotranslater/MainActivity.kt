@@ -3,6 +3,7 @@ package com.zerotranslater
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,15 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             ZeroTranslaterTheme {
+                // The pack manager is a screen *inside* this activity rather than its
+                // own activity, so nothing intercepts the system back gesture for it.
+                // Without this, pressing back on the pack manager finishes the whole
+                // task and drops the user at the launcher instead of returning to the
+                // translator. Verified on device: back exited the app outright.
+                BackHandler(enabled = showPackManager.value) {
+                    showPackManager.value = false
+                }
+
                 if (showPackManager.value) {
                     PackManagerScreen(onBack = { showPackManager.value = false })
                 } else {
