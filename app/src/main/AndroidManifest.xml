@@ -99,7 +99,7 @@
         <service
             android:name=".quicktranslate.QuickTranslateService"
             android:exported="false"
-            android:foregroundServiceType="dataSync">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Hosts a user-enabled floating translation control that opens the app's translate overlay when tapped." />

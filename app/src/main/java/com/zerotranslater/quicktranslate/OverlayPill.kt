@@ -54,8 +54,12 @@ internal class PillHost(
 
     /** Creates the view and moves the host to RESUMED so composition is permitted. */
     fun createView(context: Context): View {
+        // Only performRestore is needed here. On savedstate 1.2.1 the registry is
+        // already attached by the time this runs (the controller attaches as part of
+        // its own setup), so calling performAttach() explicitly afterwards throws
+        // "SavedStateRegistry was already attached" - which crashed the service on
+        // the very first pill show.
         savedStateController.performRestore(null)
-        savedStateController.performAttach()
 
         val view = ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
