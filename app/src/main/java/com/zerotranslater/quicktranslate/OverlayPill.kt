@@ -58,19 +58,18 @@ internal class PillHost(
         savedStateController.performAttach()
 
         val view = ComposeView(context).apply {
-            // The pill lives as long as the service does; disposing on detach
-            // would tear down the composition every time the window is re-added.
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
-            setContent {
-                ZeroTranslaterTheme {
-                    PillSurface(onTap = onTap)
-                }
-            }
         }
 
         view.setViewTreeLifecycleOwner(this)
         view.setViewTreeViewModelStoreOwner(this)
         view.setViewTreeSavedStateRegistryOwner(this)
+
+        view.setContent {
+            ZeroTranslaterTheme {
+                PillSurface(onTap = onTap)
+            }
+        }
 
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
 
