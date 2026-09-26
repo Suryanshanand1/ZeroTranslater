@@ -17,9 +17,52 @@ no API key, no cost per query. Requires Google Play services for model downloads
 | Copy translation | Platform clipboard, so Android 13+ shows its own confirmation. |
 | Language packs | Per-language download and delete, with a Wi-Fi-only switch. |
 | `PROCESS_TEXT` overlay | A bottom sheet over the host app, with Copy and "Open in ZeroTranslater". |
+| Share-sheet target | ZeroTranslater appears in the Share menu for any plain text. |
+| Floating button | An optional draggable pill over all apps. Tap it to translate what you last copied. |
 
 The language list is read at runtime from `TranslateLanguage.getAllLanguages()`,
 so nothing is hardcoded.
+
+## The floating button, and why it is not a clipboard listener
+
+Text can reach the overlay three ways: the `PROCESS_TEXT` selection menu, the
+`ACTION_SEND` share sheet, and the floating button. The share sheet is the one
+that works inside WebView-based apps such as NotebookLM, which never send
+`PROCESS_TEXT`. The floating button exists for everything else.
+
+The obvious design — watch the clipboard, pop a bubble on every copy — **cannot be
+built**, and it is worth being precise about why, because the workaround is widely
+misdescribed:
+
+- A background `ClipboardManager.OnPrimaryClipChangedListener` is **never called
+  at all**. `ClipboardService.sendClipChangedBroadcast()` gates the dispatch
+  itself on `clipboardAccessAllowed(OP_READ_CLIPBOARD, ...)`, so the callback does
+  not fire and hand you a null — it simply does not fire.
+- `AccessibilityService` is **not** an exemption. AOSP's `ClipboardService.java`
+  contains no occurrence of the string `accessib` at all. The claim that
+  accessibility services can read the clipboard in the background is not true in
+  AOSP; it persists because some OEM forks ship the exemption.
+- The complete allow-list is: the default IME, an app currently holding window
+  focus, SystemUI, Content Capture, Augmented Autofill, VirtualDevice owners, and
+  holders of the signature-only `READ_CLIPBOARD_IN_BACKGROUND`.
+
+There *is* a technique that works — a small **focusable** overlay window, which
+makes the app's UID genuinely focused so the read is permitted. Clipboard-manager
+apps on the Play Store use it. This project does not, for two reasons: the
+focusable window steals input focus from the app underneath, so you could not
+keep typing in the very app you are translating; and silently harvesting
+everything the user copies is the exact behaviour Android 10 blocked, which exists
+to stop apps reading 2FA codes and passwords out of the clipboard.
+
+So the button is a deliberate, user-initiated trigger instead. **The tap is what
+grants focus** — `ProcessTextActivity` reads the clipboard itself, in
+`onWindowFocusChanged`, which the platform permits because a real activity window
+holds focus at that point. The button is `FLAG_NOT_FOCUSABLE`, so it never takes
+focus while it is merely sitting on screen.
+
+Cost: one tap per translation, rather than zero. Benefit: no polling, no
+clipboard listener, no focus theft, and nothing that could read a password.
+
 
 ## Build
 
@@ -93,16 +136,27 @@ an Activity that can only be exercised on hardware.
 
 ## Permissions
 
-The app declares **no** `<uses-permission>` of its own and opens no sockets. The
-merged manifest contains exactly three, all contributed by dependencies:
+ZeroTranslater opens no sockets of its own; all translation is on device. The
+merged manifest contains six permissions: three arrive transitively from
+dependencies, three belong to the optional floating button.
 
 | Permission | Source | Why |
 | --- | --- | --- |
 | `INTERNET` | ML Kit | Fetching language packs. |
 | `ACCESS_NETWORK_STATE` | ML Kit | The Wi-Fi-only download condition. |
 | `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | AndroidX | Internal broadcast scoping. |
+| `SYSTEM_ALERT_WINDOW` | ours | Draws the floating button over other apps. |
+| `FOREGROUND_SERVICE` | ours | Hosts that floating button. |
+| `FOREGROUND_SERVICE_SPECIAL_USE` | ours | Android 14+ requires a declared type. |
 
-Removing the ML Kit dependencies removes all three.
+The bottom three are only exercised if you turn the floating button on, and
+Android provides no runtime dialog for `SYSTEM_ALERT_WINDOW` — it must be granted
+from a system settings page. Removing the ML Kit dependencies removes the first
+three; leaving the floating button off leaves the last three declared but unused.
+
+**No clipboard permission is declared, because none exists.** Clipboard access is
+not a permission; it is granted by *window focus*. See
+[The floating button](#the-floating-button-and-why-it-is-not-a-clipboard-listener).
 
 ## Limitations
 
@@ -110,7 +164,7 @@ Removing the ML Kit dependencies removes all three.
 `ActionMode` text-selection API. WebView-based apps, games, and many custom
 editors do not, so the entry is simply absent there. Some OEM ROMs — notably
 MIUI — strip third-party `PROCESS_TEXT` handlers outright. None of this is
-fixable from the app side.
+fixable from the app side; use the share sheet or the floating button instead.
 
 **Requires Google Play services.** Models download through Play services, so the
 app cannot translate on a degoogled device. There is no fallback engine.
@@ -133,12 +187,13 @@ often delivers a single word, which carries little evidence.
 ./gradlew test
 ```
 
-23 tests: `LanguagePairTest` (pivot rules, pack counts, rejected pairs),
-`ProcessTextIntentParserTest` (null/blank/oversized input, the 5,000-char boundary,
-`CharSequence` that is not a `String`), and `ProcessTextManifestTest`, which reads
-the **real merged manifest** and asserts the `PROCESS_TEXT` intent resolves to the
-overlay activity with the right label, that it is exported, and that it is
-excluded from recents.
+36 tests: `LanguagePairTest` (pivot rules, pack counts, rejected pairs),
+`IncomingTextResolverTest` and `ProcessTextIntentParserTest` (null/blank/oversized
+input, the 5,000-char boundary, `CharSequence` that is not a `String`), and
+`ProcessTextManifestTest`, which reads the **real merged manifest** and asserts
+that the `PROCESS_TEXT` and `ACTION_SEND` intents resolve to the overlay activity,
+that the share filter claims text but not images, that the overlay service exists
+and is not exported, and that `SYSTEM_ALERT_WINDOW` is declared.
 
 That last one matters most: a typo in the intent filter or a missing
 `category.DEFAULT` yields an app that builds, passes everything else, and never

@@ -2,15 +2,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      No <uses-permission> is declared here.
-
       ZeroTranslater opens no sockets of its own; translation happens entirely on
       device. android.permission.INTERNET arrives transitively from the ML Kit
       artifacts, which are the only component that needs it in order to fetch
       language packs from Play services. Verified with:
         ./gradlew :app:processDebugMainManifest
       See README -> "Permissions".
+
+      The three below belong to the optional floating Quick-Translate pill. The
+      overlay permission is only meaningful once the user turns the feature on,
+      and Android provides no runtime dialog for it, so it is granted from system
+      settings.
     -->
+
+    <!-- Draw the floating pill above other apps. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Android 14+ requires a foreground service to declare an explicit type. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="true"
@@ -59,7 +69,41 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+
+            <!--
+              The share sheet. This is the one text path that works inside
+              WebView-based apps such as NotebookLM, which do not implement the
+              ActionMode selection API that PROCESS_TEXT depends on. Plain text
+              only: no EXTRA_STREAM, so nothing large or binary is pulled in.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
+
+        <!--
+          Hosts the optional floating Quick-Translate pill.
+
+          foregroundServiceType="specialUse" is required from Android 14, and the
+          PROPERTY_SPECIAL_USE_FGS_SUBTYPE below is the declaration the platform
+          asks for whenever a specialUse service starts. The subtype is stated
+          plainly: this service draws a user-enabled translation control and reads
+          nothing on its own.
+
+          Note there is no <uses-permission> for clipboard access here, because
+          there is none to declare. Clipboard access is granted by window focus,
+          not by a permission, and the service deliberately never reads it.
+        -->
+        <service
+            android:name=".quicktranslate.QuickTranslateService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Hosts a user-enabled floating translation control that opens the app's translate overlay when tapped." />
+        </service>
 
     </application>
 

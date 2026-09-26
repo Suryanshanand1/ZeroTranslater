@@ -246,6 +246,11 @@ fun TranslateScreen(
                     }
                 }
             }
+
+            QuickTranslateCard(
+                enabled = state.quickTranslateEnabled,
+                onToggle = viewModel::setQuickTranslateEnabled,
+            )
         }
     }
 

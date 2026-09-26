@@ -25,6 +25,15 @@
     <string name="wifi_only_downloads">Download packs over Wi-Fi only</string>
     <string name="wifi_only_summary">Avoids using mobile data for language packs.</string>
 
+    <!-- Quick-Translate floating pill -->
+    <string name="quick_translate">Floating translate button</string>
+    <string name="quick_translate_summary">Show a small draggable button on top of other apps. Tap it to translate whatever you last copied.</string>
+    <string name="quick_translate_rationale">Android only allows an app to draw over other apps if you allow it explicitly. You will be sent to the system settings page for ZeroTranslater.</string>
+    <string name="quick_translate_permission_needed">Allow ZeroTranslater to display over other apps to use the floating button.</string>
+    <string name="quick_translate_channel">Floating translate button</string>
+    <string name="quick_translate_channel_description">Keeps the floating translate button available above other apps.</string>
+    <string name="quick_translate_notification">Tap to open ZeroTranslater</string>
+
     <string name="err_empty_input">Nothing to translate yet.</string>
     <string name="err_model_missing">Language pack not downloaded: %1$s</string>
     <string name="err_download_failed">Could not download the language pack. Check your connection.</string>

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -120,5 +121,75 @@ class ProcessTextManifestTest {
         )
         assertEquals("The app must have exactly one launcher entry", 1, matches.size)
         assertEquals("com.zerotranslater.MainActivity", matches[0].activityInfo.name)
+    }
+
+    // ------------------------------------------------------------ share sheet
+
+    private fun shareTextIntent() = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, "shared text")
+    }
+
+    @Test
+    fun `plain text share resolves to the overlay activity`() {
+        // This is the only text path that works inside WebView apps such as
+        // NotebookLM, which never send PROCESS_TEXT. If the SEND filter is dropped
+        // or mistyped, the app silently vanishes from the share sheet.
+        val matches = packageManager.queryIntentActivities(shareTextIntent(), 0)
+        assertTrue(
+            "No activity handles ACTION_SEND text/plain",
+            matches.any { it.activityInfo.name == "com.zerotranslater.ProcessTextActivity" },
+        )
+    }
+
+    @Test
+    fun `the share filter does not claim non-text shares`() {
+        // Claiming every share would put a translate button next to "Share photo",
+        // which is wrong and looks broken.
+        val imageShare = Intent(Intent.ACTION_SEND).apply { type = "image/jpeg" }
+        val matches = packageManager.queryIntentActivities(imageShare, 0)
+        assertTrue(
+            "The share target must be text/plain only",
+            matches.none { it.activityInfo.name == "com.zerotranslater.ProcessTextActivity" },
+        )
+    }
+
+    // -------------------------------------------------------- floating service
+
+    @Test
+    fun `quick translate service is declared`() {
+        val component = ComponentName(
+            RuntimeEnvironment.getApplication(),
+            "com.zerotranslater.quicktranslate.QuickTranslateService",
+        )
+        val info = packageManager.getServiceInfo(component, 0)
+        assertNotNull(info)
+    }
+
+    @Test
+    fun `quick translate service is not exported`() {
+        // It hosts a SYSTEM_ALERT_WINDOW. Anything exported could add a view to
+        // somebody else's screen.
+        val component = ComponentName(
+            RuntimeEnvironment.getApplication(),
+            "com.zerotranslater.quicktranslate.QuickTranslateService",
+        )
+        assertFalse(
+            "The overlay service must not be exported",
+            packageManager.getServiceInfo(component, 0).exported,
+        )
+    }
+
+    @Test
+    fun `overlay permission is declared`() {
+        val info = packageManager.getPackageInfo(
+            RuntimeEnvironment.getApplication().packageName,
+            PackageManager.GET_PERMISSIONS,
+        )
+        val requested = info.requestedPermissions ?: emptyArray()
+        assertTrue(
+            "SYSTEM_ALERT_WINDOW is required to draw the floating pill",
+            requested.contains("android.permission.SYSTEM_ALERT_WINDOW"),
+        )
     }
 }

@@ -2,6 +2,7 @@ package com.zerotranslater
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -36,8 +37,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zerotranslater.engine.ProcessTextLimits
 import com.zerotranslater.engine.TranslationError
-import com.zerotranslater.processtext.ProcessTextIntentParser
+import com.zerotranslater.processtext.IncomingText
+import com.zerotranslater.processtext.IncomingTextResolver
 import com.zerotranslater.processtext.ProcessTextViewModel
+import com.zerotranslater.quicktranslate.QuickTranslate
 import com.zerotranslater.ui.toMessage
 import com.zerotranslater.ui.theme.ZeroTranslaterTheme
 
@@ -53,25 +56,25 @@ class ProcessTextActivity : ComponentActivity() {
 
     private val viewModel: ProcessTextViewModel by viewModels { ProcessTextViewModel.Factory }
 
+    /**
+     * True when this launch came from the floating pill, meaning the text has to be
+     * read from the clipboard and the read cannot happen until the window has focus.
+     */
+    private var awaitingClipboard = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val parsed = ProcessTextIntentParser.parse(
-            raw = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT),
-            readOnly = intent.getBooleanExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, false),
-        )
+        val fromClipboard = intent.action == QuickTranslate.ACTION_READ_CLIPBOARD
 
-        when (parsed) {
-            is ProcessTextIntentParser.Result.Empty -> {
-                // Launched directly rather than from the selection menu, or the
-                // selection was blank. Dismiss without ever showing a window.
-                finish()
-                return
-            }
-
-            is ProcessTextIntentParser.Result.Ready -> {
-                viewModel.start(parsed.text, parsed.truncated)
-            }
+        if (fromClipboard) {
+            // Deliberately not reading the clipboard yet. The platform only grants
+            // clipboard access to an app whose UID holds window focus, and focus is
+            // not granted until after onCreate/onStart. Reading here returns null on
+            // Android 10+, so the read is deferred to onWindowFocusChanged below.
+            awaitingClipboard = true
+        } else {
+            if (!consume(extrasFor(intent))) return
         }
 
         enableEdgeToEdge()
@@ -81,6 +84,58 @@ class ProcessTextActivity : ComponentActivity() {
                 ProcessTextSheet(viewModel = viewModel, onDismiss = { finish() })
             }
         }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && awaitingClipboard) {
+            awaitingClipboard = false
+            // Now that this activity genuinely holds focus, the clipboard read is
+            // permitted by the platform. Still resolves to Empty if the clipboard
+            // holds nothing, has been auto-cleared, or holds only whitespace.
+            consume(readClipboardText())
+        }
+    }
+
+    /**
+     * Feeds text to the ViewModel.
+     *
+     * @return false when there was nothing usable, in which case the activity has
+     *   already finished and the caller must not proceed.
+     */
+    private fun consume(raw: CharSequence?): Boolean =
+        when (val incoming = IncomingTextResolver.resolve(raw, readOnly = true)) {
+            is IncomingText.Empty -> {
+                finish()
+                false
+            }
+
+            is IncomingText.Text -> {
+                viewModel.start(incoming.text, incoming.truncated)
+                true
+            }
+        }
+
+    /** The text extra matching whichever entry point launched this activity. */
+    private fun extrasFor(intent: Intent): CharSequence? =
+        if (intent.action == Intent.ACTION_SEND) {
+            intent.getCharSequenceExtra(Intent.EXTRA_TEXT)
+        } else {
+            intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+        }
+
+    /**
+     * Reads the primary clip as plain text.
+     *
+     * Returns null rather than throwing when the clip holds a non-text item, and
+     * null when access is denied - the caller treats both as "nothing to do".
+     */
+    private fun readClipboardText(): CharSequence? {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            ?: return null
+        val clip = runCatching { clipboard.primaryClip }.getOrNull() ?: return null
+        if (clip.itemCount == 0) return null
+        return runCatching { clip.getItemAt(0).coerceToText(this) }.getOrNull()
     }
 }
 

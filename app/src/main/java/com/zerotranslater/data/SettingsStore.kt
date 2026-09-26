@@ -18,6 +18,12 @@ data class Settings(
     val sourceLanguage: String = LanguagePair.AUTO,
     val targetLanguage: String = DEFAULT_TARGET,
     val wifiOnlyDownloads: Boolean = false,
+    /**
+     * Whether the user wants the floating Quick-Translate pill. Defaults to false:
+     * it draws over other apps, so it must be an explicit choice rather than
+     * something the app turns on for you.
+     */
+    val quickTranslateEnabled: Boolean = false,
 ) {
     companion object {
         /**
@@ -37,6 +43,7 @@ class SettingsStore(private val context: Context) {
         val SOURCE = stringPreferencesKey("source_language")
         val TARGET = stringPreferencesKey("target_language")
         val WIFI_ONLY = booleanPreferencesKey("wifi_only_downloads")
+        val QUICK_TRANSLATE = booleanPreferencesKey("quick_translate_enabled")
     }
 
     val settings: Flow<Settings> = context.dataStore.data
@@ -49,6 +56,7 @@ class SettingsStore(private val context: Context) {
                 sourceLanguage = prefs[Keys.SOURCE] ?: LanguagePair.AUTO,
                 targetLanguage = prefs[Keys.TARGET] ?: Settings.DEFAULT_TARGET,
                 wifiOnlyDownloads = prefs[Keys.WIFI_ONLY] ?: false,
+                quickTranslateEnabled = prefs[Keys.QUICK_TRANSLATE] ?: false,
             )
         }
 
@@ -62,5 +70,9 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setWifiOnlyDownloads(enabled: Boolean) {
         context.dataStore.edit { it[Keys.WIFI_ONLY] = enabled }
+    }
+
+    suspend fun setQuickTranslateEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.QUICK_TRANSLATE] = enabled }
     }
 }

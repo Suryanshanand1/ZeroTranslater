@@ -13,6 +13,7 @@ import com.zerotranslater.engine.LanguagePair
 import com.zerotranslater.engine.TranslateRequest
 import com.zerotranslater.engine.TranslationError
 import com.zerotranslater.engine.TranslationManager
+import com.zerotranslater.quicktranslate.QuickTranslateService
 import com.zerotranslater.engine.TranslationOutcome
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -38,6 +39,7 @@ data class TranslateUiState(
     val missingPacks: List<String> = emptyList(),
     val isDownloadingPacks: Boolean = false,
     val wifiOnlyDownloads: Boolean = false,
+    val quickTranslateEnabled: Boolean = false,
 ) {
     val charCount: Int get() = sourceText.length
     val canTranslate: Boolean get() = sourceText.isNotBlank() && !isBusy
@@ -45,6 +47,14 @@ data class TranslateUiState(
 }
 
 class TranslateViewModel(application: Application) : ViewModel() {
+
+    /**
+     * Held explicitly because this extends plain [ViewModel], not
+     * [AndroidViewModel], so there is no inherited getApplication(). Starting the
+     * overlay service needs a context, and the application context is the correct
+     * one: the service outlives any activity.
+     */
+    private val app: Application = application
 
     private val settingsStore = SettingsStore(application)
 
@@ -104,7 +114,15 @@ class TranslateViewModel(application: Application) : ViewModel() {
                         source = saved.sourceLanguage,
                         target = saved.targetLanguage,
                         wifiOnly = saved.wifiOnlyDownloads,
-                    )
+                    ).copy(quickTranslateEnabled = saved.quickTranslateEnabled)
+                }
+
+                // Keep the pill in step with the stored preference. This is also the
+                // recovery path: if the service was killed, or the overlay
+                // permission was granted while the app was closed, re-launching the
+                // app brings the pill back without the user touching the switch.
+                if (saved.quickTranslateEnabled) {
+                    QuickTranslateService.start(app)
                 }
             }
         }
@@ -202,6 +220,27 @@ class TranslateViewModel(application: Application) : ViewModel() {
 
     fun setWifiOnlyDownloads(enabled: Boolean) {
         viewModelScope.launch { settingsStore.setWifiOnlyDownloads(enabled) }
+    }
+
+    /**
+     * Turns the floating pill on or off.
+     *
+     * The service is started and stopped here rather than left to the composable so
+     * that enabling and disabling are one atomic decision: the preference and the
+     * running service can never disagree, including if this is called from the
+     * settings-recovery path after the service was killed.
+     */
+    fun setQuickTranslateEnabled(enabled: Boolean) {
+        if (enabled) {
+            // Returns false when the overlay permission is missing. The UI checks
+            // first and routes the user to system settings, so reaching here without
+            // it means something changed underneath us; leave the preference off
+            // rather than storing a setting that silently does nothing.
+            if (!QuickTranslateService.start(app)) return
+        } else {
+            QuickTranslateService.stop(app)
+        }
+        viewModelScope.launch { settingsStore.setQuickTranslateEnabled(enabled) }
     }
 
     fun dismissError() {
