@@ -9,6 +9,7 @@ account, no API key, and no cost per query.
 ## Contents
 
 - [What it does](#what-it-does)
+- [Verified on device](#verified-on-device)
 - [Build and run](#build-and-run)
 - [Signing](#signing)
 - [APK size](#apk-size)
@@ -35,6 +36,55 @@ account, no API key, and no cost per query.
 Language list is read at runtime from
 `TranslateLanguage.getAllLanguages()` — nothing is hardcoded, so a Play services
 model update that adds a language needs no code change.
+
+## Verified on device
+
+Tested on a physical **Xiaomi device running Android 16 (SDK 36), arm64-v8a**, with
+Google Play services present. What actually ran:
+
+| Area | Result |
+| --- | --- |
+| Cold / warm launch | 1386 ms / 220 ms, no `FATAL`, no `AndroidRuntime` errors |
+| Auto-detect | Correctly identified Spanish from free text |
+| Pack download | Real fetch: `gvt1.com/edgedl/translate/offline/v5/high/r29/en_es.zip` |
+| Translation | `el gato negro duerme en la casa` → "The black cat sleeps in the house" |
+| English-pivot hint | `es→af` correctly reported "Routed via English — needs 3 packs" |
+| Pack manager | Downloaded packs show **On device** + Delete; others **Not downloaded** + Download |
+| `PROCESS_TEXT` overlay | Activity + `ModalBottomSheet` render, with Copy and "Open in ZeroTranslater" |
+| Settings | Survived a full cold restart |
+
+The merged manifest on device requests exactly three permissions, all inherited
+from dependencies: `INTERNET`, `ACCESS_NETWORK_STATE`, and
+`DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
+
+### Bugs this found that the test suite did not
+
+Two defects surfaced only on hardware, and both are fixed:
+
+1. **Stale output after a language change.** `runTranslation` read the UI state and
+   then awaited the engine. Changing the source or target during that window
+   published the finished translation under the *new* pair's labels — a Spanish →
+   English result displayed as though it were a translation into French. Cancelling
+   the job was not sufficient, because `Job.cancel()` only *requests* cancellation.
+   Fixed with a `translationEpoch` counter; a translation whose epoch is stale now
+   discards its result instead of publishing it.
+2. **Back on the pack manager exited the app.** The pack manager is a screen inside
+   `MainActivity`, not its own activity, so nothing intercepted the system back
+   gesture. Pressing back finished the task and discarded the typed text. Fixed with
+   a `BackHandler`.
+
+Neither was reachable from a JVM test: the first needs real concurrency and the
+second is a navigation concern.
+
+### Not yet verified
+
+**The selection-menu entry has not been seen in a real text-selection menu.** The
+overlay was verified by firing a `PROCESS_TEXT` intent directly at it, which
+proves the activity, the translucent theme, and the bottom sheet all work — but not
+that a host app's selection menu renders "Ztranslate". Confirming that needs a host
+app that declares `PROCESS_TEXT`; on the test device only 3 of 409 installed
+packages did, and Chrome and Gmail were not among them. See
+[Known limitations](#known-limitations).
 
 ## Build and run
 
