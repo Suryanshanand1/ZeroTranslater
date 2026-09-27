@@ -10,11 +10,14 @@ import com.google.mlkit.common.model.DownloadConditions
 import com.zerotranslater.data.Settings
 import com.zerotranslater.data.SettingsStore
 import com.zerotranslater.engine.LanguagePair
+import com.zerotranslater.engine.MeaningRepository
+import com.zerotranslater.engine.SingleWordDetector
 import com.zerotranslater.engine.TranslateRequest
 import com.zerotranslater.engine.TranslationError
 import com.zerotranslater.engine.TranslationManager
-import com.zerotranslater.quicktranslate.QuickTranslateService
 import com.zerotranslater.engine.TranslationOutcome
+import com.zerotranslater.engine.WordMeaning
+import com.zerotranslater.quicktranslate.QuickTranslateService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +43,9 @@ data class TranslateUiState(
     val isDownloadingPacks: Boolean = false,
     val wifiOnlyDownloads: Boolean = false,
     val quickTranslateEnabled: Boolean = false,
+    /** Meaning of the current word, if it is a single word and was found. */
+    val meaning: WordMeaning? = null,
+    val onlineFallbackEnabled: Boolean = false,
 ) {
     val charCount: Int get() = sourceText.length
     val canTranslate: Boolean get() = sourceText.isNotBlank() && !isBusy
@@ -48,23 +54,9 @@ data class TranslateUiState(
 
 class TranslateViewModel(application: Application) : ViewModel() {
 
-    /**
-     * Held explicitly because this extends plain [ViewModel], not
-     * [AndroidViewModel], so there is no inherited getApplication(). Starting the
-     * overlay service needs a context, and the application context is the correct
-     * one: the service outlives any activity.
-     */
     private val app: Application = application
-
     private val settingsStore = SettingsStore(application)
-
-    /**
-     * Read synchronously by the engine when it builds download conditions, so it is
-     * a plain volatile field rather than part of the state flow.
-     */
-    @Volatile
-    private var wifiOnly: Boolean = false
-
+    private var wifiOnly = false
     private val manager = TranslationManager(
         downloadConditions = {
             if (wifiOnly) {
@@ -74,34 +66,19 @@ class TranslateViewModel(application: Application) : ViewModel() {
             }
         },
     )
+    private val meaningRepo = MeaningRepository(app)
 
     private val _state = MutableStateFlow(TranslateUiState())
     val state: StateFlow<TranslateUiState> = _state.asStateFlow()
 
     private var translateJob: Job? = null
-
-    /**
-     * Invalidates the result of any in-flight translation.
-     *
-     * `Job.cancel()` only *requests* cancellation: it marks the coroutine and
-     * returns at once, so an in-flight `manager.translate` can still complete and
-     * would then write its output into state that has already moved on - showing a
-     * translation of the previous language pair underneath the newly selected pair.
-     * Bumping this counter on every input, language, or clearing change lets
-     * [runTranslation] recognise its own result as stale and discard it.
-     */
+    private var meaningJob: Job? = null
     private var translationEpoch = 0
 
-    /**
-     * Drops any in-flight translation and clears the busy flag.
-     *
-     * The flag has to be reset here rather than left to the cancelled coroutine:
-     * a cancelled coroutine never reaches the line that clears it, so relying on
-     * that strands the UI on a permanent progress indicator.
-     */
     private fun cancelInFlight() {
         translationEpoch++
         translateJob?.cancel()
+        meaningJob?.cancel()
         _state.update { it.copy(isBusy = false) }
     }
 
@@ -109,18 +86,17 @@ class TranslateViewModel(application: Application) : ViewModel() {
         viewModelScope.launch {
             settingsStore.settings.collect { saved ->
                 wifiOnly = saved.wifiOnlyDownloads
+                meaningRepo.onlineFallbackEnabled = saved.onlineMeaningFallback
                 _state.update { current ->
                     current.withLanguages(
                         source = saved.sourceLanguage,
                         target = saved.targetLanguage,
                         wifiOnly = saved.wifiOnlyDownloads,
-                    ).copy(quickTranslateEnabled = saved.quickTranslateEnabled)
+                    ).copy(
+                        quickTranslateEnabled = saved.quickTranslateEnabled,
+                        onlineFallbackEnabled = saved.onlineMeaningFallback,
+                    )
                 }
-
-                // Keep the pill in step with the stored preference. This is also the
-                // recovery path: if the service was killed, or the overlay
-                // permission was granted while the app was closed, re-launching the
-                // app brings the pill back without the user touching the switch.
                 if (saved.quickTranslateEnabled) {
                     QuickTranslateService.start(app)
                 }
@@ -131,7 +107,7 @@ class TranslateViewModel(application: Application) : ViewModel() {
     // ------------------------------------------------------------------- input
 
     fun onSourceTextChange(value: String) {
-        _state.update { it.copy(sourceText = value, error = null) }
+        _state.update { it.copy(sourceText = value, error = null, meaning = null) }
         cancelInFlight()
         translateJob = viewModelScope.launch {
             delay(DEBOUNCE_MS)
@@ -146,8 +122,6 @@ class TranslateViewModel(application: Application) : ViewModel() {
     }
 
     fun onSourceLanguageChange(code: String) {
-        // The pair is about to change, so a translation of the old pair is now
-        // meaningless. Drop it instead of leaving it on screen under new labels.
         cancelInFlight()
         _state.update {
             it.copy(
@@ -156,6 +130,7 @@ class TranslateViewModel(application: Application) : ViewModel() {
                 error = null,
                 resolvedSource = null,
                 inputWasTruncated = false,
+                meaning = null,
             )
         }
         viewModelScope.launch { settingsStore.setSourceLanguage(code) }
@@ -169,19 +144,12 @@ class TranslateViewModel(application: Application) : ViewModel() {
                 output = "",
                 error = null,
                 inputWasTruncated = false,
+                meaning = null,
             )
         }
         viewModelScope.launch { settingsStore.setTargetLanguage(code) }
     }
 
-    /**
-     * Swap is only meaningful between two concrete languages.
-     *
-     * With auto-detect as the source there is no concrete language to promote, so
-     * the current target becomes an explicit source and the target falls back to
-     * the default. That is the only predictable reading of "swap" here; the
-     * alternative - silently doing nothing - would read as a broken button.
-     */
     fun swapLanguages() {
         val current = _state.value
         val concreteSource = current.resolvedSource
@@ -208,13 +176,14 @@ class TranslateViewModel(application: Application) : ViewModel() {
                 inputWasTruncated = false,
                 missingPacks = emptyList(),
                 isBusy = false,
+                meaning = null,
             )
         }
     }
 
     private fun clearOutput() {
         _state.update {
-            it.copy(output = "", error = null, resolvedSource = null, inputWasTruncated = false)
+            it.copy(output = "", error = null, resolvedSource = null, inputWasTruncated = false, meaning = null)
         }
     }
 
@@ -222,25 +191,20 @@ class TranslateViewModel(application: Application) : ViewModel() {
         viewModelScope.launch { settingsStore.setWifiOnlyDownloads(enabled) }
     }
 
-    /**
-     * Turns the floating pill on or off.
-     *
-     * The service is started and stopped here rather than left to the composable so
-     * that enabling and disabling are one atomic decision: the preference and the
-     * running service can never disagree, including if this is called from the
-     * settings-recovery path after the service was killed.
-     */
     fun setQuickTranslateEnabled(enabled: Boolean) {
         if (enabled) {
-            // Returns false when the overlay permission is missing. The UI checks
-            // first and routes the user to system settings, so reaching here without
-            // it means something changed underneath us; leave the preference off
-            // rather than storing a setting that silently does nothing.
             if (!QuickTranslateService.start(app)) return
         } else {
             QuickTranslateService.stop(app)
         }
         viewModelScope.launch { settingsStore.setQuickTranslateEnabled(enabled) }
+    }
+
+    fun setOnlineMeaningFallback(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setOnlineMeaningFallback(enabled)
+            meaningRepo.onlineFallbackEnabled = enabled
+        }
     }
 
     fun dismissError() {
@@ -266,9 +230,6 @@ class TranslateViewModel(application: Application) : ViewModel() {
             ),
         )
 
-        // The input, the language pair, or both changed while this was in flight.
-        // [current] describes a state that no longer exists, so the result is
-        // discarded rather than published.
         if (epoch != translationEpoch) return
 
         when (outcome) {
@@ -294,9 +255,22 @@ class TranslateViewModel(application: Application) : ViewModel() {
                 )
             }
         }
+
+        // Look up meaning for single words, regardless of translation success/failure.
+        // This lets users see the definition even when auto-detect gives low confidence.
+        val textToLookup = current.sourceText.trim()
+        if (SingleWordDetector.isSingleWord(textToLookup)) {
+            meaningJob = viewModelScope.launch {
+                val normalised = textToLookup.lowercase()
+                meaningRepo.lookup(normalised)?.let { meaning ->
+                    if (epoch == translationEpoch) {
+                        _state.update { current.copy(meaning = meaning) }
+                    }
+                }
+            }
+        }
     }
 
-    /** Downloads the packs this translation is blocked on, then retries it. */
     fun downloadMissingPacks() {
         val missing = _state.value.missingPacks
         if (missing.isEmpty()) return
@@ -320,8 +294,6 @@ class TranslateViewModel(application: Application) : ViewModel() {
     }
 
     override fun onCleared() {
-        // Releases the cached ML Kit translator's native memory. Without this the
-        // model stays resident for the lifetime of the process.
         manager.close()
         super.onCleared()
     }
@@ -353,12 +325,6 @@ private fun TranslateUiState.withLanguages(
     wifiOnlyDownloads = wifiOnly,
 ).recomputePackHint()
 
-/**
- * Works out how many packs the current pair costs and whether it has to route
- * through English. Returns null packs when the source is still auto-detect,
- * because the real number is not knowable until a language is detected - showing
- * a guess would be worse than showing nothing.
- */
 private fun TranslateUiState.recomputePackHint(): TranslateUiState {
     val concrete = resolvedSource ?: sourceLanguage.takeIf { it != LanguagePair.AUTO }
     return if (concrete == null) {

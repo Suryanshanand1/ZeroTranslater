@@ -17,6 +17,7 @@ model downloads.
 | Swap | With auto-detect active it swaps using the detected language, falling back to the default target. |
 | Copy translation | Platform clipboard, so Android 13+ shows its own confirmation. |
 | Language packs | Per-language download and delete, with a Wi-Fi-only switch. |
+| Word meanings | Offline-first lookup for single words via a bundled English dataset, with an online fallback to dictionaryapi.dev when disabled in settings. Displayed on the main screen below the output and inside the selection overlay. |
 | Selection menu | `PROCESS_TEXT` opens a bottom sheet over the host app, with Copy and "Open in ZeroTranslater". |
 | Share sheet | Share any plain text to ZeroTranslater. |
 | Floating button | Optional draggable pill over all apps; tap it to translate what you last copied. |
@@ -45,7 +46,7 @@ build-tools 36.0.0, and a `local.properties` containing `sdk.dir=...`. Use
 ./gradlew assembleDebug          # installable, signed with the debug key
 ./gradlew assembleRelease        # R8-minified
 ./gradlew bundleRelease          # .aab - the artifact to publish
-./gradlew test                   # 36 unit tests
+./gradlew test                   # unit tests (SingleWordDetector, MeaningRepository, etc.)
 ./gradlew lintDebug
 ```
 
@@ -139,13 +140,25 @@ permission.
 ./gradlew test
 ```
 
-36 tests: `LanguagePairTest` (pivot rules, pack counts, rejected pairs),
+38 tests: `LanguagePairTest` (pivot rules, pack counts, rejected pairs),
 `IncomingTextResolverTest` and `ProcessTextIntentParserTest` (null/blank/
 oversized input, the 5,000-char boundary, `CharSequence` that is not a
-`String`), and `ProcessTextManifestTest`, which reads the real merged manifest
-and asserts the intent filters resolve to the overlay activity, the share
-filter claims text but not images, and the overlay service exists and is not
-exported.
+`String`), `SingleWordDetectorTest` (letter-only matching, hyphen and
+apostrophe handling, whitespace and numeric rejection), `MeaningRepositoryTest`
+(verifies only single words trigger lookups), and `ProcessTextManifestTest`,
+which reads the real merged manifest and asserts the intent filters resolve to
+the overlay activity, the share filter claims text but not images, and the
+overlay service exists and is not exported.
+
+## Single-word meaning lookup
+
+When the source text is a single English word, ZeroTranslater shows its
+dictionary meaning below the translation output (on the main screen) or inside
+the selection overlay sheet. The lookup is offline-first: a bundled set of
+gzipped JSON shards in `assets/meanings/shards/` covers common English words.
+When the shard has no entry, an optional online fallback calls
+`dictionaryapi.dev` — togglable in Settings as "Online dictionary fallback".
+Neither the local read nor the network request exposes device identifiers.
 
 ## License
 

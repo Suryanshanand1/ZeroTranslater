@@ -10,10 +10,13 @@ import com.google.mlkit.common.model.DownloadConditions
 import com.zerotranslater.data.Settings
 import com.zerotranslater.data.SettingsStore
 import com.zerotranslater.engine.LanguagePair
+import com.zerotranslater.engine.MeaningRepository
+import com.zerotranslater.engine.SingleWordDetector
 import com.zerotranslater.engine.TranslateRequest
 import com.zerotranslater.engine.TranslationError
 import com.zerotranslater.engine.TranslationManager
 import com.zerotranslater.engine.TranslationOutcome
+import com.zerotranslater.engine.WordMeaning
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +30,7 @@ data class ProcessTextUiState(
     val isBusy: Boolean = true,
     val truncated: Boolean = false,
     val error: TranslationError? = null,
+    val meaning: WordMeaning? = null,
 )
 
 /**
@@ -45,6 +49,8 @@ class ProcessTextViewModel(application: Application) : ViewModel() {
         // available rather than consulting the Wi-Fi-only preference.
         downloadConditions = { DownloadConditions.Builder().build() },
     )
+
+    private val meaningRepo = MeaningRepository(application)
 
     private val _state = MutableStateFlow(ProcessTextUiState())
     val state: StateFlow<ProcessTextUiState> = _state.asStateFlow()
@@ -88,6 +94,20 @@ class ProcessTextViewModel(application: Application) : ViewModel() {
                 is TranslationOutcome.Failure -> _state.update {
                     it.copy(isBusy = false, translation = "", error = outcome.error)
                 }
+            }
+
+            // Look up meaning for single words, even on failure (e.g. low-confidence
+            // auto-detect), so the user still gets the definition.
+            val originalTrimmed = originalText.trim()
+            if (SingleWordDetector.isSingleWord(originalTrimmed)) {
+                viewModelScope.launch {
+                    val normalised = originalTrimmed.lowercase()
+                    meaningRepo.lookup(normalised)?.let { meaning ->
+                        _state.update { it.copy(meaning = meaning) }
+                    }
+                }
+            } else {
+                _state.update { it.copy(meaning = null) }
             }
         }
     }

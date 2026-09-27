@@ -24,6 +24,12 @@ data class Settings(
      * something the app turns on for you.
      */
     val quickTranslateEnabled: Boolean = false,
+    /**
+     * Whether to fall back to an online dictionary API when the local WordNet
+     * dataset has no entry for a word. Default true: most devices have at least
+     * intermittent connectivity, and the API fills gaps in the offline dataset.
+     */
+    val onlineMeaningFallback: Boolean = true,
 ) {
     companion object {
         /**
@@ -44,6 +50,7 @@ class SettingsStore(private val context: Context) {
         val TARGET = stringPreferencesKey("target_language")
         val WIFI_ONLY = booleanPreferencesKey("wifi_only_downloads")
         val QUICK_TRANSLATE = booleanPreferencesKey("quick_translate_enabled")
+        val ONLINE_MEANING = booleanPreferencesKey("online_meaning_fallback")
     }
 
     val settings: Flow<Settings> = context.dataStore.data
@@ -57,6 +64,7 @@ class SettingsStore(private val context: Context) {
                 targetLanguage = prefs[Keys.TARGET] ?: Settings.DEFAULT_TARGET,
                 wifiOnlyDownloads = prefs[Keys.WIFI_ONLY] ?: false,
                 quickTranslateEnabled = prefs[Keys.QUICK_TRANSLATE] ?: false,
+                onlineMeaningFallback = prefs[Keys.ONLINE_MEANING] ?: true,
             )
         }
 
@@ -74,5 +82,9 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setQuickTranslateEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.QUICK_TRANSLATE] = enabled }
+    }
+
+    suspend fun setOnlineMeaningFallback(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.ONLINE_MEANING] = enabled }
     }
 }

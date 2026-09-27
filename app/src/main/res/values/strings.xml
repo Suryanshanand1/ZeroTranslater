@@ -45,6 +45,9 @@
     <string name="retry">Retry</string>
     <string name="source_text_label">Text to translate</string>
     <string name="translation_label">Translation</string>
+    <string name="meaning_label">Meaning of \"%1$s\"</string>
+    <string name="online_meaning_fallback">Online dictionary fallback</string>
+    <string name="online_meaning_fallback_summary">Use an online dictionary when the local dataset has no entry. Requires internet.</string>
     <string name="original_text_label">Selected text</string>
     <string name="no_packs_yet">No language packs installed yet.</string>
     <string name="search_languages">Search languages</string>

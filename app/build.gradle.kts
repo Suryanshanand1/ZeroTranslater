@@ -23,8 +23,8 @@ android {
         applicationId = "com.zerotranslater"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         // NOTE: no <uses-permission android:name="android.permission.INTERNET" /> is
         // declared here on purpose. The app itself opens zero sockets. INTERNET is merged

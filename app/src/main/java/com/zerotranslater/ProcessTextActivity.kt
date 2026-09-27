@@ -16,9 +16,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -37,13 +41,16 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.width
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zerotranslater.engine.ProcessTextLimits
 import com.zerotranslater.engine.TranslationError
+import com.zerotranslater.engine.WordMeaning
 import com.zerotranslater.processtext.IncomingText
 import com.zerotranslater.processtext.IncomingTextResolver
 import com.zerotranslater.processtext.ProcessTextViewModel
 import com.zerotranslater.quicktranslate.QuickTranslate
+import com.zerotranslater.ui.MeaningCard
 import com.zerotranslater.ui.toMessage
 import com.zerotranslater.ui.theme.ZeroTranslaterTheme
 
@@ -250,6 +257,11 @@ private fun ProcessTextSheet(
                         text = state.translation,
                         style = MaterialTheme.typography.titleLarge,
                     )
+                }
+
+                // Show meaning when the selected text is a single word.
+                state.meaning?.let { meaning ->
+                    MeaningCard(meaning = meaning)
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

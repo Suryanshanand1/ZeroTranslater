@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -58,6 +59,7 @@ import com.zerotranslater.R
 import com.zerotranslater.engine.LanguagePair
 import com.zerotranslater.engine.ProcessTextLimits
 import com.zerotranslater.engine.TranslationError
+import com.zerotranslater.engine.WordMeaning
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -245,6 +247,11 @@ fun TranslateScreen(
                         Text(text = state.output, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
+
+                // Show meaning card when input is a single word and we have definitions.
+                state.meaning?.let { meaning ->
+                    MeaningCard(meaning = meaning)
+                }
             }
 
             QuickTranslateCard(
@@ -420,7 +427,47 @@ private fun ErrorCard(
  * Android 13+ shows its own copy confirmation, so no extra toast is needed there;
  * the caller surfaces a snackbar only as a fallback.
  */
-private fun copyToClipboard(context: Context, text: String) {
+internal fun copyToClipboard(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     clipboard?.setPrimaryClip(ClipData.newPlainText("ZeroTranslater", text))
+}
+
+@Composable
+internal fun MeaningCard(meaning: WordMeaning) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.meaning_label, meaning.word),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            meaning.senses.take(5).forEach { sense ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = sense.pos.uppercase() + ".",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.width(24.dp),
+                    )
+                    Text(
+                        text = sense.definition,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
 }
